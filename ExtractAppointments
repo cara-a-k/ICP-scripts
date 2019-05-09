@@ -1,0 +1,92 @@
+Sub ExportCalendarsToExcel()
+    Dim olkFolder As Outlook.Folder, olkItems As Outlook.Items, olkAppt As Outlook.AppointmentItem, olkRpnt As Outlook.Recipient
+    Dim excApp As Object, excWkb As Object, excSht As Object, excRng As Object, lngRow As Long
+    Dim arrCal As Variant, datDate As Date
+    'Add additional calendars by name if required'
+    arrCal = Array("ICP - Hydra", "ICP - Pyxis", "ICP - Collab Area")
+    strDat = InputBox("Enter the date range of the appointments to export in the form ""mm/dd/yyyy to mm/dd/yyyy""", SCRIPT_NAME, Date & " to " & Date)
+    arrTmp = Split(strDat, "to")
+    datBeg = IIf(IsDate(arrTmp(0)), arrTmp(0), Date) & " 12:00am"
+    datEnd = IIf(IsDate(arrTmp(1)), arrTmp(1), Date) & " 11:59pm"
+
+    'Launch Excel and create new spreadsheet with headers'
+    Set excApp = CreateObject("Excel.Application")
+    excApp.Visible = True
+    Set excWkb = excApp.Workbooks.Add()
+    Set excSht = excWkb.Worksheets(1)
+    With excSht
+        .Cells(1, 1) = "Date"
+        .Cells(1, 2) = "Start Time"
+        .Cells(1, 3) = "End Time"
+        .Cells(1, 4) = "Calendar"
+        .Cells(1, 5) = "Subject"
+        .Cells(1, 6) = "Organiser"
+        .Cells(1, 7) = "Attendee Names"
+        .Cells(1, 8) = "Attendee Emails"
+        .Cells(1, 9) = "Details"
+    End With
+
+    lngRow = 2
+    For Each varCal In arrCal
+        'Connect to and process the shared calendar'
+        Set olkRecipient = Session.CreateRecipient(varCal)
+        Set olkFolder = Session.GetSharedDefaultFolder(olkRecipient, olFolderCalendar)
+        If TypeName(olkFolder) <> "Nothing" Then
+            If olkFolder.DefaultItemType = olAppointmentItem Then
+                Set olkItems = olkFolder.Items
+                olkItems.Sort "[Start]"
+                olkItems.IncludeRecurrences = True
+                'Restrict to time range specified'
+                Set olkRequest = olkItems.Restrict("[Start] >= '" & Format(datBeg, "ddddd h:nn AMPM") & "' AND [Start] <= '" & Format(datEnd, "ddddd h:nn AMPM") & "'")
+                For Each olkAppt In olkRequest
+                    'Only export appointments'
+                    If olkAppt.Class = olAppointment Then
+                        strAddresses = ""
+                        strNames = ""
+                        For Each olkRpnt In olkAppt.Recipients
+                            'Remove names in brackets'
+                            'Use vbNewLine instead of ", " for newline separated entries'
+                            bPos = InStr(olkRpnt.Name, "(")
+                            If bPos Then
+                                strNames = strNames & Left(olkRpnt.Name, bPos - 1) & ", "
+                            Else
+                                strNames = strNames & olkRpnt.Name & ", "
+                            End If
+                            'Only include normal looking addresses'
+                            If olkRpnt.Address Like "*@*" Then strAddresses = strAddresses & olkRpnt.Address & ", "
+
+                        Next
+                        'Remove final ", " from strings'
+                        If strAddresses <> "" Then strAddresses = Left(strAddresses, Len(strAddresses) - 2)
+                        If strNames <> "" Then strNames = Left(strNames, Len(strNames) - 2)
+                        'Fields to be exported'
+                        excSht.Cells(lngRow, 1) = Format(olkAppt.Start, "mm/dd/yyyy")
+                        excSht.Cells(lngRow, 2) = Format(olkAppt.Start, "hh:nn ampm")
+                        excSht.Cells(lngRow, 3) = Format(olkAppt.End, "hh:nn ampm")
+                        excSht.Cells(lngRow, 4) = varCal
+                        excSht.Cells(lngRow, 5) = olkAppt.Subject
+                        excSht.Cells(lngRow, 6) = olkAppt.Organizer
+                        excSht.Cells(lngRow, 7) = strNames
+                        excSht.Cells(lngRow, 8) = strAddresses
+                        excSht.Cells(lngRow, 9) = olkAppt.Body
+                        lngRow = lngRow + 1
+                    End If
+                Next
+            Else
+                MsgBox "Operation cancelled.  The selected folder is not a calendar.  You must select a calendar for this macro to work.", vbCritical + vbOKOnly, SCRIPT_NAME
+            End If
+        Else
+            MsgBox "I could not find a folder named " & varCal & ".  Folder skipped.  I will continue processing the remaining folders.", vbExclamation + vbOKOnly, SCRIPT_NAME
+        End If
+    Next
+
+    excSht.Columns("A:I").AutoFit
+    'Clean-up the Outlook objects'
+    Set excRng = Nothing
+    Set excSht = Nothing
+    Set excWkb = Nothing
+    Set excApp = Nothing
+    Set olkFolder = Nothing
+    Set olkItems = Nothing
+    Set olkAppt = Nothing
+End Sub
